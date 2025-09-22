@@ -9,9 +9,10 @@
     <!-- Frames (now prefixed by namespace if provided) -->
     <arg name="odom_frame" default="$(arg ns)/odom" />
     <arg name="base_frame" default="$(arg ns)/base_link" />
-
+    
+    <!-- to use mechanum wheels set to true-->
     <arg name="use_mcnamu" default="false" />
-    <arg name="pub_odom_tf" default="false" />
+    <arg name="pub_odom_tf" default="true" />
 
     <!-- Group nodes under namespace -->
     <group ns="$(arg ns)">
