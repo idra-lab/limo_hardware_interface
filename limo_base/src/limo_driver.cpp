@@ -43,10 +43,14 @@ LimoDriver::LimoDriver()  {
     private_nh.param<bool>("pub_odom_tf", pub_odom_tf_, false);
     private_nh.param<bool>("use_mcnamu", use_mcnamu_, false);
 
+    joint_state_pub_ = nh.advertise<sensor_msgs::JointState>("joint_states", 10);
     odom_publisher_ = nh.advertise<nav_msgs::Odometry>("/odom", 50, true);
     status_publisher_ = nh.advertise<limo_base::LimoStatus>("/limo_status", 10, true);
     imu_publisher_ = nh.advertise<sensor_msgs::Imu>("/imu", 10, true);
     motion_cmd_sub_ = nh.subscribe<geometry_msgs::Twist>("/cmd_vel", 5, &LimoDriver::twistCmdCallback, this);
+
+
+    nh.param<bool>("pub_joint_state", pub_joint_state, false);
 
     // connect to the serial port
     if (port_name.find("tty") != port_name.npos){
@@ -225,9 +229,48 @@ void LimoDriver::parseFrame(const LimoFrame& frame) {
         /****************** sensor frame *****************/
         case MSG_ODOMETRY_ID: {
             int32_t left_wheel_odom = (frame.data[3] & 0xff) | (frame.data[2] << 8) |
-                                      (frame.data[1] << 16)  | (frame.data[0] << 24);
+                                    (frame.data[1] << 16)  | (frame.data[0] << 24);
             int32_t right_wheel_odom = (frame.data[7] & 0xff) | (frame.data[6] << 8) |
-                                       (frame.data[5] << 16)  | (frame.data[4] << 24);
+                                    (frame.data[5] << 16)  | (frame.data[4] << 24);
+            if (pub_joint_state)
+            {
+                sensor_msgs::JointState js;
+                js.header.stamp = ros::Time(frame.stamp);
+
+                js.name = {"front_left_wheel", "front_right_wheel", "rear_left_wheel", "rear_right_wheel"};
+                js.position.resize(4);
+                js.velocity.resize(4);
+
+                // conversion constants
+                double ticks_per_wheel_rev = 300.0;   // encoder CPR × gearbox
+                double radians_per_tick    = 2.0 * M_PI / ticks_per_wheel_rev;
+
+                // positions
+                js.position[0] = left_wheel_odom  * radians_per_tick;
+                js.position[2] = left_wheel_odom  * radians_per_tick;
+                js.position[1] = right_wheel_odom * radians_per_tick;
+                js.position[3] = right_wheel_odom * radians_per_tick;
+                
+                // velocities (rad/s)
+                if (have_last_ticks_) {
+                    double dt = (ros::Time(frame.stamp) - last_stamp_).toSec();
+                    if (dt > 1e-4) {
+                        double dleft  = (left_wheel_odom  - last_left_ticks_)  * radians_per_tick;
+                        double dright = (right_wheel_odom - last_right_ticks_) * radians_per_tick;
+
+                        js.velocity[0] = dleft  / dt;
+                        js.velocity[1] = dright / dt;
+                    }
+                }
+
+                // update stored values
+                last_left_ticks_  = left_wheel_odom;
+                last_right_ticks_ = right_wheel_odom;
+                last_stamp_       = ros::Time(frame.stamp);
+                have_last_ticks_  = true;
+
+                joint_state_pub_.publish(js);
+            }
             break;
         }
         case MSG_IMU_ACCEL_ID: { // accelerate

@@ -39,6 +39,7 @@
 #include <tf/tf.h>
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/Imu.h>
+#include <sensor_msgs/JointState.h>
 #include <limo_base/LimoStatus.h>
 #include "serial_port.h"
 #include "limo_protocol.h"
@@ -86,6 +87,8 @@ private:
     ros::Publisher odom_publisher_;
     ros::Publisher status_publisher_;
     ros::Publisher imu_publisher_;
+    ros::Publisher joint_state_pub_;
+
     ros::Subscriber motion_cmd_sub_;
     tf::TransformBroadcaster tf_broadcaster_;
 
@@ -106,6 +109,13 @@ private:
     static constexpr double wheelbase_ = 0.2;         // m (front rear wheel distance)
     static constexpr double left_angle_scale_ = 2.47;
     static constexpr double right_angle_scale_ = 1.64;
+
+    // Store last encoder values
+    int32_t last_left_ticks_  = 0;
+    int32_t last_right_ticks_ = 0;
+    ros::Time last_stamp_;
+    bool have_last_ticks_ = false;
+    bool  pub_joint_state = false;
 };
 
 }

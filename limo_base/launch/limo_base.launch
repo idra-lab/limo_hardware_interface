@@ -13,6 +13,8 @@
     <!-- to use mechanum wheels set to true-->
     <arg name="use_mcnamu" default="false" />
     <arg name="pub_odom_tf" default="true" />
+    
+    <param name="pub_joint_state" value="false"/>
 
     <!-- Group nodes under namespace -->
     <group ns="$(arg ns)">
