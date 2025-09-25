@@ -13,7 +13,8 @@
     <!-- to use mechanum wheels set to true-->
     <arg name="use_mcnamu" default="false" />
     <arg name="pub_odom_tf" default="true" />
-    
+    <arg name="rate_odom_tf" default="100" />
+
     <param name="pub_joint_state" value="false"/>
 
     <!-- Group nodes under namespace -->
@@ -24,6 +25,7 @@
             <param name="base_frame" value="$(arg base_frame)" />
             <param name="use_mcnamu" value="$(arg use_mcnamu)" />
             <param name="pub_odom_tf" value="$(arg pub_odom_tf)" />
+            <param name="rate_odom_tf" value="$(arg rate_odom_tf)" />
            <!-- Force topics into namespace cause are hardcoded in src-->
             <remap from="/cmd_vel" to="cmd_vel"/>
             <remap from="/odom" to="odom"/>

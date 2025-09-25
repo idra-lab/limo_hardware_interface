@@ -55,6 +55,7 @@ private:
     void connect(std::string dev_name, uint32_t bouadrate);
     void readData();
     void processRxData(uint8_t data);
+    void publishLoop();
     void parseFrame(const LimoFrame& frame);
     void sendFrame(const LimoFrame& frame);
     void setMotionCommand(double linear_vel, double steer_angle,
@@ -62,6 +63,7 @@ private:
     void enableCommandedMode();
     void enableMcMode();
 
+    void publishJointState(double stamp, double left_wheel_position,  double right_wheel_position,double left_wheel_velocity,  double right_wheel_velocity);
     void publishOdometry(double stamp, double linear_velocity,
                          double angular_velocity, double lateral_velocity,
                          double steering_angle);
@@ -78,11 +80,13 @@ private:
 private:
     std::shared_ptr<SerialPort> port_;
     std::shared_ptr<std::thread> read_data_thread_;
+    std::shared_ptr<std::thread> publish_thread_;
 
     std::string odom_frame_;
     std::string base_frame_;
     bool pub_odom_tf_ = false;
     bool use_mcnamu_ = false;
+    double rate_odom_tf_ = 100.;
 
     ros::Publisher odom_publisher_;
     ros::Publisher status_publisher_;
@@ -113,9 +117,28 @@ private:
     // Store last encoder values
     int32_t last_left_ticks_  = 0;
     int32_t last_right_ticks_ = 0;
-    ros::Time last_stamp_;
+    double last_stamp_jstate_;
     bool have_last_ticks_ = false;
     bool  pub_joint_state = false;
+
+    // shared state jstate
+    double left_wheel_position_{0.0};
+    double right_wheel_position_{0.0};
+    double left_wheel_velocity_{0.0};
+    double right_wheel_velocity_{0.0};
+
+    // shared state odom
+    double linear_velocity_{0.0};
+    double angular_velocity_{0.0};
+    double lateral_velocity_{0.0};
+    double steering_angle_{0.0};  
+
+    double last_stamp_odom_;
+
+
+    // mutex for shared state
+    std::mutex state_mutex_;
+
 };
 
 }

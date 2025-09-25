@@ -41,6 +41,7 @@ LimoDriver::LimoDriver()  {
     private_nh.param<std::string>("odom_frame", odom_frame_, std::string("odom"));
     private_nh.param<std::string>("base_frame", base_frame_, std::string("base_link"));
     private_nh.param<bool>("pub_odom_tf", pub_odom_tf_, false);
+    private_nh.param<double>("rate_odom_tf", rate_odom_tf_, 100);
     private_nh.param<bool>("use_mcnamu", use_mcnamu_, false);
 
     joint_state_pub_ = nh.advertise<sensor_msgs::JointState>("joint_states", 10);
@@ -66,7 +67,14 @@ LimoDriver::LimoDriver()  {
 }
 
 LimoDriver::~LimoDriver() {
+    if (read_data_thread_ && read_data_thread_->joinable())
+        read_data_thread_->join();
 
+    if (publish_thread_ && publish_thread_->joinable())
+        publish_thread_->join();
+
+    if (port_ && port_->isOpen())
+        port_->closePort();
 }
 
 double LimoDriver::degToRad(double deg) {
@@ -86,8 +94,12 @@ double LimoDriver::normalizeAngle(double angle) {
 void LimoDriver::connect(std::string dev_name, uint32_t bouadrate) {
     port_ = std::shared_ptr<SerialPort>(new SerialPort(dev_name, bouadrate));
     if (port_->openPort() == 0) {
+        // Start reading thread
         read_data_thread_ = std::shared_ptr<std::thread>(
-            new std::thread(std::bind(&LimoDriver::readData, this)));  //std::bind() 绑定readData的参数 
+            new std::thread(std::bind(&LimoDriver::readData, this)));  
+        // Start publishing thread
+        publish_thread_ = std::make_shared<std::thread>(
+            std::bind(&LimoDriver::publishLoop, this));
     }   
     else {
         ROS_ERROR("Failed to open %s", port_->getDevPath().c_str());
@@ -170,6 +182,60 @@ void LimoDriver::processRxData(uint8_t data) {
     }
 }
 
+void LimoDriver::publishJointState(double stamp, double left_wheel_position,  double right_wheel_position,double left_wheel_velocity,  double right_wheel_velocity) {
+  
+        sensor_msgs::JointState js;
+        js.header.stamp = ros::Time(stamp);
+
+        js.name = {"front_left_wheel", "front_right_wheel", "rear_left_wheel", "rear_right_wheel"};
+        js.position.resize(4);
+        js.velocity.resize(4);
+
+        // positions
+        js.position[0] = left_wheel_position;
+        js.position[2] = left_wheel_position;
+        js.position[1] = right_wheel_position;
+        js.position[3] = right_wheel_position;
+
+        // velocities (rad/s)
+        js.velocity[0] = left_wheel_velocity;
+        js.velocity[2] = left_wheel_velocity;
+        js.velocity[1] = right_wheel_velocity;
+        js.velocity[3] = right_wheel_velocity;
+
+        joint_state_pub_.publish(js);
+            
+}
+
+
+void LimoDriver::publishLoop() {
+    ros::Rate rate(rate_odom_tf_);
+
+    while (ros::ok()) {
+        double stamp_odom, stamp_jstate, lv, av, latv, sa, lw_p, rw_p, lw_v, rw_v;
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            stamp_odom = last_stamp_odom_;
+            stamp_jstate = last_stamp_jstate_;
+            lv    = linear_velocity_;
+            av    = angular_velocity_;
+            latv  = lateral_velocity_;
+            sa    = steering_angle_;
+            lw_p    = left_wheel_position_;
+            rw_p = right_wheel_position_;
+            lw_v = left_wheel_velocity_;
+            rw_v = right_wheel_velocity_;
+        }
+        publishOdometry(stamp_odom, lv, av, latv, sa);
+
+        if (pub_joint_state)
+        {
+            publishJointState(stamp_jstate, lw_p, rw_p, lw_v,rw_v);
+        }
+        rate.sleep();
+    }
+}
+
 void LimoDriver::parseFrame(const LimoFrame& frame) {
     switch (frame.id) {
         case MSG_MOTION_STATE_ID: {
@@ -177,14 +243,20 @@ void LimoDriver::parseFrame(const LimoFrame& frame) {
             double angular_velocity = static_cast<int16_t>((frame.data[3] & 0xff) | (frame.data[2] << 8)) / 1000.0;
             double lateral_velocity = static_cast<int16_t>((frame.data[5] & 0xff) | (frame.data[4] << 8)) / 1000.0;
             double steering_angle = static_cast<int16_t>((frame.data[7] & 0xff) | (frame.data[6] << 8)) / 1000.0;
-            if (steering_angle > 0) {
+
+            if (steering_angle > 0)
                 steering_angle *= left_angle_scale_;
-            }
-            else {
+            else
                 steering_angle *= right_angle_scale_;
+
+            {
+                std::lock_guard<std::mutex> lock(state_mutex_);
+                linear_velocity_  = linear_velocity;
+                angular_velocity_ = angular_velocity;
+                lateral_velocity_ = lateral_velocity;
+                steering_angle_   = steering_angle;
+                last_stamp_odom_  = frame.stamp;
             }
-            publishOdometry(frame.stamp, linear_velocity, angular_velocity,
-                            lateral_velocity, steering_angle);
             break;
         }
         case MSG_SYSTEM_STATE_ID: {
@@ -232,45 +304,44 @@ void LimoDriver::parseFrame(const LimoFrame& frame) {
                                     (frame.data[1] << 16)  | (frame.data[0] << 24);
             int32_t right_wheel_odom = (frame.data[7] & 0xff) | (frame.data[6] << 8) |
                                     (frame.data[5] << 16)  | (frame.data[4] << 24);
-            if (pub_joint_state)
-            {
-                sensor_msgs::JointState js;
-                js.header.stamp = ros::Time(frame.stamp);
 
-                js.name = {"front_left_wheel", "front_right_wheel", "rear_left_wheel", "rear_right_wheel"};
-                js.position.resize(4);
-                js.velocity.resize(4);
+            // conversion constants
+            double ticks_per_wheel_rev = 300.0;   // encoder CPR × gearbox
+            double radians_per_tick    = 2.0 * M_PI / ticks_per_wheel_rev;
 
-                // conversion constants
-                double ticks_per_wheel_rev = 300.0;   // encoder CPR × gearbox
-                double radians_per_tick    = 2.0 * M_PI / ticks_per_wheel_rev;
+            // positions
+            double left_wheel_position = left_wheel_odom  * radians_per_tick; 
+            double right_wheel_position = right_wheel_odom * radians_per_tick;
+            double left_wheel_velocity;
+            double right_wheel_velocity;                         
 
-                // positions
-                js.position[0] = left_wheel_odom  * radians_per_tick;
-                js.position[2] = left_wheel_odom  * radians_per_tick;
-                js.position[1] = right_wheel_odom * radians_per_tick;
-                js.position[3] = right_wheel_odom * radians_per_tick;
-                
-                // velocities (rad/s)
-                if (have_last_ticks_) {
-                    double dt = (ros::Time(frame.stamp) - last_stamp_).toSec();
-                    if (dt > 1e-4) {
-                        double dleft  = (left_wheel_odom  - last_left_ticks_)  * radians_per_tick;
-                        double dright = (right_wheel_odom - last_right_ticks_) * radians_per_tick;
+            // velocities (rad/s)
+            if (have_last_ticks_) {
+                double dt =  frame.stamp - last_stamp_jstate_;
+                if (dt > 1e-4) {
+                    double dleft  = (left_wheel_odom  - last_left_ticks_)  * radians_per_tick;
+                    double dright = (right_wheel_odom - last_right_ticks_) * radians_per_tick;
 
-                        js.velocity[0] = dleft  / dt;
-                        js.velocity[1] = dright / dt;
-                    }
+                    left_wheel_velocity = dleft  / dt;
+                    right_wheel_velocity = dright / dt;
                 }
-
-                // update stored values
-                last_left_ticks_  = left_wheel_odom;
-                last_right_ticks_ = right_wheel_odom;
-                last_stamp_       = ros::Time(frame.stamp);
-                have_last_ticks_  = true;
-
-                joint_state_pub_.publish(js);
             }
+
+            // update stored values
+            last_left_ticks_  = left_wheel_odom;
+            last_right_ticks_ = right_wheel_odom;     
+            have_last_ticks_  = true;
+
+            {
+                std::lock_guard<std::mutex> lock(state_mutex_);
+                left_wheel_position_  = left_wheel_position;
+                right_wheel_position_ = right_wheel_position;
+                left_wheel_velocity_ = left_wheel_velocity;
+                right_wheel_velocity_   = right_wheel_velocity;
+                last_stamp_jstate_       = frame.stamp;
+            }
+
+            
             break;
         }
         case MSG_IMU_ACCEL_ID: { // accelerate
