@@ -14,8 +14,8 @@
     <arg name="use_mcnamu" default="false" />
     <arg name="pub_odom_tf" default="true" />
     <arg name="rate_odom_tf" default="100" />
-
-    <param name="pub_joint_state" value="false"/>
+    <arg name="pub_joint_state" default="true" />
+  
 
     <!-- Group nodes under namespace -->
     <group ns="$(arg ns)">
@@ -26,11 +26,13 @@
             <param name="use_mcnamu" value="$(arg use_mcnamu)" />
             <param name="pub_odom_tf" value="$(arg pub_odom_tf)" />
             <param name="rate_odom_tf" value="$(arg rate_odom_tf)" />
+            <param name="pub_joint_state" value="$(arg pub_joint_state)"/>
+	    <param name="ns" value="$(arg ns)"/>
            <!-- Force topics into namespace cause are hardcoded in src-->
             <remap from="/cmd_vel" to="cmd_vel"/>
             <remap from="/odom" to="odom"/>
             <remap from="/scan" to="scan"/>
-             <remap from="/imu" to="imu"/>
+            <remap from="/imu" to="imu"/>      
         </node>
     </group>
 </launch>

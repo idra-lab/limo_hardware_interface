@@ -43,15 +43,14 @@ LimoDriver::LimoDriver()  {
     private_nh.param<bool>("pub_odom_tf", pub_odom_tf_, false);
     private_nh.param<double>("rate_odom_tf", rate_odom_tf_, 100);
     private_nh.param<bool>("use_mcnamu", use_mcnamu_, false);
+    private_nh.param<bool>("pub_joint_state", pub_joint_state, false);
+    private_nh.param<std::string>("ns", name_space, std::string("limo0"));
 
     joint_state_pub_ = nh.advertise<sensor_msgs::JointState>("joint_states", 10);
     odom_publisher_ = nh.advertise<nav_msgs::Odometry>("/odom", 50, true);
     status_publisher_ = nh.advertise<limo_base::LimoStatus>("/limo_status", 10, true);
     imu_publisher_ = nh.advertise<sensor_msgs::Imu>("/imu", 10, true);
     motion_cmd_sub_ = nh.subscribe<geometry_msgs::Twist>("/cmd_vel", 5, &LimoDriver::twistCmdCallback, this);
-
-
-    nh.param<bool>("pub_joint_state", pub_joint_state, false);
 
     // connect to the serial port
     if (port_name.find("tty") != port_name.npos){
@@ -187,9 +186,10 @@ void LimoDriver::publishJointState(double stamp, double left_wheel_position,  do
         sensor_msgs::JointState js;
         js.header.stamp = ros::Time(stamp);
 
-        js.name = {"front_left_wheel", "front_right_wheel", "rear_left_wheel", "rear_right_wheel"};
+        js.name = {name_space+"/front_left_wheel", name_space+"/front_right_wheel", name_space+"/rear_left_wheel", name_space+"/rear_right_wheel"};
         js.position.resize(4);
         js.velocity.resize(4);
+        js.effort.resize(4);
 
         // positions
         js.position[0] = left_wheel_position;
@@ -203,6 +203,10 @@ void LimoDriver::publishJointState(double stamp, double left_wheel_position,  do
         js.velocity[1] = right_wheel_velocity;
         js.velocity[3] = right_wheel_velocity;
 
+        js.effort[0] = 0.0;
+        js.effort[2] = 0.0;
+        js.effort[1] = 0.0;
+        js.effort[3] = 0.0;
         joint_state_pub_.publish(js);
             
 }

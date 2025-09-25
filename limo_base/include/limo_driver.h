@@ -138,7 +138,7 @@ private:
 
     // mutex for shared state
     std::mutex state_mutex_;
-
+    std::string name_space; 
 };
 
 }
