@@ -115,8 +115,8 @@ private:
     static constexpr double right_angle_scale_ = 1.64;
 
     // Store last encoder values
-    int32_t last_left_ticks_  = 0;
-    int32_t last_right_ticks_ = 0;
+    double last_left_wheel_position_  = 0;
+    double last_right_wheel_position_ = 0;
     double last_stamp_jstate_;
     bool have_last_ticks_ = false;
     bool  pub_joint_state = false;

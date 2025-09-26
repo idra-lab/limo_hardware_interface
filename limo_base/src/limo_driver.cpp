@@ -313,27 +313,34 @@ void LimoDriver::parseFrame(const LimoFrame& frame) {
             double ticks_per_wheel_rev = 300.0;   // encoder CPR × gearbox
             double radians_per_tick    = 2.0 * M_PI / ticks_per_wheel_rev;
 
+
             // positions
             double left_wheel_position = left_wheel_odom  * radians_per_tick; 
             double right_wheel_position = right_wheel_odom * radians_per_tick;
             double left_wheel_velocity;
             double right_wheel_velocity;                         
 
+            double ts = 0.02; //50hz
+            double ta = 0.04;
+            double beta = ts/(ts+ta);
+            static double left_wheel_position_f = 0.;
+            static double right_wheel_position_f = 0.;
+            left_wheel_position_f = beta*(left_wheel_position) + (1-beta)*left_wheel_position_f;
+            right_wheel_position_f = beta*(right_wheel_position) + (1-beta)*right_wheel_position_f;
+            
             // velocities (rad/s)
             if (have_last_ticks_) {
                 double dt =  frame.stamp - last_stamp_jstate_;
+  
                 if (dt > 1e-4) {
-                    double dleft  = (left_wheel_odom  - last_left_ticks_)  * radians_per_tick;
-                    double dright = (right_wheel_odom - last_right_ticks_) * radians_per_tick;
-
-                    left_wheel_velocity = dleft  / dt;
-                    right_wheel_velocity = dright / dt;
+                    left_wheel_velocity = (left_wheel_position_f - last_left_wheel_position_)  / dt;
+                    right_wheel_velocity = (right_wheel_position_f - last_right_wheel_position_)  / dt;
                 }
             }
 
             // update stored values
-            last_left_ticks_  = left_wheel_odom;
-            last_right_ticks_ = right_wheel_odom;     
+            last_left_wheel_position_  = left_wheel_position_f;
+            last_right_wheel_position_ = right_wheel_position_f;     
             have_last_ticks_  = true;
 
             {
@@ -440,7 +447,16 @@ void LimoDriver::setMotionCommand(double linear_vel, double angular_vel,
     LimoFrame frame;
     frame.id = MSG_MOTION_COMMAND_ID;
     int16_t linear_cmd = linear_vel * 1000;
-    int16_t angular_cmd = angular_vel * 1000;
+
+    //int16_t angular_cmd = angular_vel * 1000;
+    int16_t angular_cmd = static_cast<int16_t>(angular_vel * 1000);
+    
+        
+    // Avoid firmware bug when linear_cmd == 200 and angular_cmd == ±1000
+    if (linear_cmd == 200 && (angular_cmd == 1000 || angular_cmd == -1000)) {
+        angular_cmd += (angular_cmd > 0 ? 1 : -1);
+    }
+
     int16_t lateral_cmd = lateral_velocity * 1000;
     int16_t steering_cmd = steering_angle * 1000;
 
