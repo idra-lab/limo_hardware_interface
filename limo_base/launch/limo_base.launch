@@ -32,7 +32,8 @@
             <remap from="/cmd_vel" to="cmd_vel"/>
             <remap from="/odom" to="odom"/>
             <remap from="/scan" to="scan"/>
-            <remap from="/imu" to="imu"/>      
+            <remap from="/imu" to="imu"/>     
+            <remap from="/limo_status" to="limo_status"/>    
         </node>
     </group>
 </launch>
