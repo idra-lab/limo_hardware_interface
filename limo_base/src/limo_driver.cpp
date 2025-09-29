@@ -310,7 +310,7 @@ void LimoDriver::parseFrame(const LimoFrame& frame) {
                                     (frame.data[5] << 16)  | (frame.data[4] << 24);
 
             // conversion constants
-            double ticks_per_wheel_rev = 300.0;   // encoder CPR × gearbox
+            double ticks_per_wheel_rev = 291.5;   // encoder CPR × gearbox
             double radians_per_tick    = 2.0 * M_PI / ticks_per_wheel_rev;
 
 
@@ -667,6 +667,7 @@ void LimoDriver::publishOdometry(double stamp, double linear_velocity,
     odom_msg.pose.pose.orientation = odom_quat;
 
     odom_msg.twist.twist.linear.x = w_vx;
+    odom_msg.twist.twist.linear.y = w_vy;
     odom_msg.twist.twist.angular.z = wz;
 
     odom_msg.pose.covariance[0] = 0.1;
