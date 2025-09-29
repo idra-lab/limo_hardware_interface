@@ -594,7 +594,8 @@ void LimoDriver::publishOdometry(double stamp, double linear_velocity,
 
     double wz = 0.0;
     double vx = 0.0, vy = 0.0;
-
+    double w_vx = 0.0, w_vy = 0.0;
+    
     switch (motion_mode_) {
         case MODE_FOUR_DIFF: {
             vx = linear_velocity;
@@ -635,6 +636,10 @@ void LimoDriver::publishOdometry(double stamp, double linear_velocity,
     position_x_ += cos(rad) * vx * dt - sin(rad) * vy * dt;
     position_y_ += sin(rad) * vx * dt + cos(rad) * vy * dt;
 
+    //compute twist in WF
+    w_vx = cos(rad) * vx   - sin(rad) * vy ;
+    w_vy = sin(rad) * vx  + cos(rad) * vy ;
+	
     geometry_msgs::Quaternion odom_quat = tf::createQuaternionMsgFromYaw(rad);
     //std::cout<< "odom_quat:" << odom_quat<<std::endl;
     if (pub_odom_tf_) {
@@ -661,8 +666,7 @@ void LimoDriver::publishOdometry(double stamp, double linear_velocity,
     odom_msg.pose.pose.position.z = 0.0;
     odom_msg.pose.pose.orientation = odom_quat;
 
-    odom_msg.twist.twist.linear.x = vx;
-    odom_msg.twist.twist.linear.y = vy;
+    odom_msg.twist.twist.linear.x = w_vx;
     odom_msg.twist.twist.angular.z = wz;
 
     odom_msg.pose.covariance[0] = 0.1;
