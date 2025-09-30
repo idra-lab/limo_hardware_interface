@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # WIFI CONFIG
 # SSID: OptiTrack
 # PSW: 60A84A244BECD
@@ -20,7 +21,7 @@ DoubleValue = struct.Struct('<d')
 
 class NatNetClient:
   # def __init__(self, ver=(3, 0, 0, 0), server_ip="192.168.2.3", quiet=True):
-  def __init__(self, ver=(3, 0, 0, 0), server_ip="192.168.1.3", quiet=True):
+  def __init__(self, ver=(3, 0, 0, 0), server_ip="192.168.1.4", quiet=True):
     self.__natNetStreamVersion = ver
     self.serverIPAddress = server_ip
     self.multicastAddress = "239.255.42.99"
@@ -411,6 +412,8 @@ class NatNetClient:
       self.__natNetStreamVersion = struct.unpack('BBBB',
                                                  data[offset:offset + 4])
       offset += 4
+      print("NatNet server responded:", self.__natNetStreamVersion)
+
     elif messageID == self.NAT_RESPONSE:
       if packetSize == 4:
         commandResponse = int.from_bytes(data[offset:offset + 4],
@@ -432,6 +435,7 @@ class NatNetClient:
       # print("DEBUG: " + str(len(data)))
       if len(data) > 0:
         self.__processMessage(data)
+      #print("DEBUG received {} bytes from {}".format(len(data), addr))
 
   # ================================ Sockets ================================ #
   def __createDataSocket(self, port):
@@ -450,7 +454,8 @@ class NatNetClient:
                       socket.inet_aton(self.multicastAddress)
                       + socket.inet_aton(my_ip))
 
-    result.bind((self.multicastAddress, port))
+    #result.bind((self.multicastAddress, port))
+    result.bind(('', port))
     return result
 
   def __createCommandSocket(self):
@@ -477,6 +482,7 @@ class NatNetClient:
   def run(self):
     # Data socket and thread
     self.dataSocket = self.__createDataSocket(self.dataPort)
+
     if self.dataSocket is None:
       raise RuntimeError("Could not open data channel")
     dataThread = Thread(target=self.__threadFunction, args=(self.dataSocket,))
@@ -488,5 +494,16 @@ class NatNetClient:
     commandThread = Thread(target=self.__threadFunction,
                            args=(self.commandSocket,))
 
-    dataThread.start()
 
+
+    # Start threads
+    dataThread.start()
+    commandThread.start()
+
+    # ---- NEW: send ping to get NatNet version ----
+    try:
+      self.sendCommand(self.NAT_PING, "Ping", self.commandSocket,
+                       (self.serverIPAddress, self.commandPort))
+      print("Sent NAT_PING to server {}:{}".format(self.serverIPAddress, self.commandPort))
+    except Exception as e:
+      print("Could not send ping:", e)

@@ -1,35 +1,34 @@
+#!/usr/bin/env python3
 # WIFI CONFIG
 # SSID: OptiTrack
 # PSW: 60A84A244BECD
 
 import rospy
+from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped, Twist
 import numpy as np
 from copy import deepcopy
-from math import atan2, asin
 import math
 import sys
+import tf
 
 # Import your existing NatNet client (same as in ROS2 code)
-from optitrack_interface.nat_net_client import NatNetClient
+from nat_net_client import NatNetClient
 
 # IMPORTANT: can be overridden via ROS param ~tracked_robot_id
-TRACKED_ROBOT_ID_DEFAULT = 20
+ROBOT_ID_DEFAULT = 20
 
 class Optitrack(object):
-    def __init__(self, debug=False):
+    def __init__(self, debug=True, ns="limo0"):
         node_name = 'optitrack_node'
         rospy.loginfo('%s starting (ROS1 port) - version 2.2', node_name)
 
-        self.publisher_pose  = rospy.Publisher('/optitrack/pose',  PoseStamped, queue_size=10)
-        self.publisher_twist = rospy.Publisher('/optitrack/twist', Twist,        queue_size=10)
 
-        # World rotation mapping (same as your ROS2 code)
-        self.R_w = np.array([[1.0, 0.0,  0.0],
-                             [0.0, 0.0, -1.0],
-                             [0.0, 1.0,  0.0]])
+        self.ns = ns
+        self.pub_odom  = rospy.Publisher('/'+self.ns+'/odom',  Odometry, queue_size=10)
+        self.odom_msg = Odometry()
 
-        self.publisher_frequency = 200.0  # Hz
+        self.publisher_frequency = 100.0  # Hz
         self.pub_timer = rospy.Timer(rospy.Duration(1.0 / self.publisher_frequency), self.pub_timer_callback)
 
         self.actual_pose      = PoseStamped()
@@ -42,16 +41,19 @@ class Optitrack(object):
         self.calls            = 0
         self.total_calls      = 0
 
+        self.broadcaster = tf.TransformBroadcaster()
+
         if self.debug:
             self.debug_timer = rospy.Timer(rospy.Duration(1.0), self.debug_timer_callback)
 
         # Params
-        self.tracked_robot_id = rospy.get_param('~tracked_robot_id', TRACKED_ROBOT_ID_DEFAULT)
+        self.marker_robot_id =  ROBOT_ID_DEFAULT
 
         # Start NatNet streaming client
-        streamingClient = NatNetClient(ver=(3, 2, 0, 0), quiet=True)
+        streamingClient = NatNetClient(ver=(3, 1, 0, 0), quiet=True)
         streamingClient.rigidBodyListener = self.receiveRigidBodyFrame
         streamingClient.run()
+        print("optitrack node init successfull")
 
     # --- Math helpers (unchanged logic) ---
     def euler_from_quaternion(self, quaternion):
@@ -107,49 +109,52 @@ class Optitrack(object):
         # Publish only after at least one OptiTrack frame was received
         if self.total_calls >= 1:
             # Copy current pose to feasible pose
-            self.feasible_pose.header.stamp = self.actual_pose.header.stamp
-            self.feasible_pose.header.frame_id = self.actual_pose.header.frame_id
-            self.feasible_pose.pose.position.x = self.actual_pose.pose.position.x
-            self.feasible_pose.pose.position.y = self.actual_pose.pose.position.y
-            self.feasible_pose.pose.position.z = self.actual_pose.pose.position.z
-            self.feasible_pose.pose.orientation.w = self.actual_pose.pose.orientation.w
-            self.feasible_pose.pose.orientation.x = self.actual_pose.pose.orientation.x
-            self.feasible_pose.pose.orientation.y = self.actual_pose.pose.orientation.y
-            self.feasible_pose.pose.orientation.z = self.actual_pose.pose.orientation.z
+            self.odom_msg.header.stamp = rospy.Time.now()
+            self.odom_msg.header.frame_id = '/' + self.ns + '/odom'
+            self.odom_msg.child_frame_id = '/' + self.ns + '/base_link'
+            self.odom_msg.pose.pose.position.x = self.actual_pose.pose.position.x
+            self.odom_msg.pose.pose.position.y = self.actual_pose.pose.position.y
+            self.odom_msg.pose.pose.position.z = self.actual_pose.pose.position.z
+            self.odom_msg.pose.pose.orientation.w = self.actual_pose.pose.orientation.w
+            self.odom_msg.pose.pose.orientation.x = self.actual_pose.pose.orientation.x
+            self.odom_msg.pose.pose.orientation.y = self.actual_pose.pose.orientation.y
+            self.odom_msg.pose.pose.orientation.z = self.actual_pose.pose.orientation.z
+            self.odom_msg.twist.twist.linear.x  = float(self.vel[0])
+            self.odom_msg.twist.twist.linear.y  = float(self.vel[1])
+            self.odom_msg.twist.twist.linear.z  = float(self.vel[2])
+            self.odom_msg.twist.twist.angular.x = float(self.omega[0])
+            self.odom_msg.twist.twist.angular.y = float(self.omega[1])
+            self.odom_msg.twist.twist.angular.z = float(self.omega[2])
+            self.pub_odom.publish(self.odom_msg)
 
-            self.publisher_pose.publish(self.feasible_pose)
-
-            self.twist_msg.linear.x  = float(self.vel[0])
-            self.twist_msg.linear.y  = float(self.vel[1])
-            self.twist_msg.linear.z  = float(self.vel[2])
-            self.twist_msg.angular.x = float(self.omega[0])
-            self.twist_msg.angular.y = float(self.omega[1])
-            self.twist_msg.angular.z = float(self.omega[2])
-            self.publisher_twist.publish(self.twist_msg)
+            #send TF from odom to baseframe
+            self.broadcaster.sendTransform(np.array([ self.actual_pose.pose.position.x,  self.actual_pose.pose.position.y,  self.actual_pose.pose.position.z]),
+                                           np.array([
+                                               self.actual_pose.pose.orientation.x,
+                                               self.actual_pose.pose.orientation.y,
+                                               self.actual_pose.pose.orientation.z,
+                                               self.actual_pose.pose.orientation.w
+                                           ]),
+                                           rospy.Time.now(), '/'+self.ns+'/base_link', '/'+self.ns+'/odom')
 
     # --- NatNet callback (runs in client thread) ---
     def receiveRigidBodyFrame(self, rid, position, rotation):
-        if rid != self.tracked_robot_id:
+        if rid != self.marker_robot_id:
             rospy.logdebug('Message with different tracker ID: %s', str(rid))
             return
 
         # Header
         self.actual_pose.header.frame_id = "tag"
         self.actual_pose.header.stamp = rospy.Time.now()
-
-        # Position (apply R_w like in ROS2 code)
-        px = self.R_w[0, 0] * position[0] + self.R_w[0, 1] * position[1] + self.R_w[0, 2] * position[2]
-        py = self.R_w[1, 0] * position[0] + self.R_w[1, 1] * position[1] + self.R_w[1, 2] * position[2]
-        pz = self.R_w[2, 0] * position[0] + self.R_w[2, 1] * position[1] + self.R_w[2, 2] * position[2]
-        self.actual_pose.pose.position.x = px
-        self.actual_pose.pose.position.y = py
-        self.actual_pose.pose.position.z = pz
+        self.actual_pose.pose.position.x = position[0]
+        self.actual_pose.pose.position.y = position[1]
+        self.actual_pose.pose.position.z = position[2]
 
         # Orientation: NatNet gives (qx, qy, qz, qw)
         self.actual_pose.pose.orientation.w = rotation[3]     # q_w
         self.actual_pose.pose.orientation.x = rotation[0]     # q_x
-        self.actual_pose.pose.orientation.y = -rotation[2]    # -q_z
-        self.actual_pose.pose.orientation.z = rotation[1]     # q_y
+        self.actual_pose.pose.orientation.y = rotation[1]    # q_y
+        self.actual_pose.pose.orientation.z = rotation[2]     # q_z
 
         # Flip quaternion if long path
         old_quat = np.array([self.feasible_pose.pose.orientation.w,
@@ -193,15 +198,16 @@ class Optitrack(object):
         self.total_calls += 1
 
 if __name__ == '__main__':
-    rospy.init_node('optitrack_node')
-    args = rospy.myargv(argv=sys.argv)
-    debug = False
-    if len(args) == 2 and args[1] == '--debug':
-      debug = True
+    rospy.init_node('optitrack_node', anonymous=False)
 
-    node = Optitrack(debug=debug)
+    limo_ns = rospy.get_param("~ns", "limo0")
+    args = rospy.myargv(argv=sys.argv)
+    debug = '--debug' in args
+
+    node = Optitrack(debug=debug, ns=limo_ns)
+
     try:
-      rospy.spin()
+        rospy.spin()
     except KeyboardInterrupt:
-      pass
-    rospy.loginfo('Shutting down optitrack_node')
+        pass
+    rospy.loginfo("Shutting down optitrack_node")
