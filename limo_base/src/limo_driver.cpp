@@ -184,7 +184,7 @@ void LimoDriver::processRxData(uint8_t data) {
 void LimoDriver::publishJointState(double stamp, double left_wheel_position,  double right_wheel_position,double left_wheel_velocity,  double right_wheel_velocity) {
   
         sensor_msgs::JointState js;
-        js.header.stamp = ros::Time(stamp);
+        js.header.stamp = ros::Time::now();
 
         js.name = {name_space+"/front_left_wheel", name_space+"/front_right_wheel", name_space+"/rear_left_wheel", name_space+"/rear_right_wheel"};
         js.position.resize(4);
@@ -230,8 +230,9 @@ void LimoDriver::publishLoop() {
             lw_v = left_wheel_velocity_;
             rw_v = right_wheel_velocity_;
         }
-        publishOdometry(stamp_odom, lv, av, latv, sa);
-
+        if (pub_odom_tf_){
+            publishOdometry(stamp_odom, lv, av, latv, sa);
+	}
         if (pub_joint_state)
         {
             publishJointState(stamp_jstate, lw_p, rw_p, lw_v,rw_v);
@@ -642,18 +643,19 @@ void LimoDriver::publishOdometry(double stamp, double linear_velocity,
 	
     geometry_msgs::Quaternion odom_quat = tf::createQuaternionMsgFromYaw(rad);
     //std::cout<< "odom_quat:" << odom_quat<<std::endl;
-    if (pub_odom_tf_) {
-        geometry_msgs::TransformStamped tf_msg;
-        tf_msg.header.stamp = ros::Time::now();
-        tf_msg.header.frame_id = odom_frame_;
-        tf_msg.child_frame_id = base_frame_;
+    
+    //publish the TF from odom to base frme
+    geometry_msgs::TransformStamped tf_msg;
+    tf_msg.header.stamp = ros::Time::now();
+    tf_msg.header.frame_id = odom_frame_;
+    tf_msg.child_frame_id = base_frame_;
 
-        tf_msg.transform.translation.x = position_x_;
-        tf_msg.transform.translation.y = position_y_;
-        tf_msg.transform.translation.z = 0.0;
-        tf_msg.transform.rotation = odom_quat;
-        tf_broadcaster_.sendTransform(tf_msg);
-    }
+    tf_msg.transform.translation.x = position_x_;
+    tf_msg.transform.translation.y = position_y_;
+    tf_msg.transform.translation.z = 0.0;
+    tf_msg.transform.rotation = odom_quat;
+    tf_broadcaster_.sendTransform(tf_msg);
+
 
     // odom message
     nav_msgs::Odometry odom_msg;

@@ -3,16 +3,19 @@
     <!-- Namespace argument -->
     <arg name="ns" default="limo0" />
     <arg name="laser" default="true" />
-
+    <arg name="pub_odom_tf" default="false" />
+   
     <!-- ttyTHS1 for NVIDIA nano serial port-->
     <!-- ttyUSB0 for IPC USB serial port -->
     <arg name="port_name" default="ttyTHS1" />
     <arg name="use_mcnamu" default="false" />
+    
 
     <include file="$(find limo_base)/launch/limo_base.launch">
         <arg name="port_name" value="$(arg port_name)" />
         <arg name="use_mcnamu" value="$(arg use_mcnamu)" />
         <arg name="ns" value="$(arg ns)" />
+        <arg name="pub_odom_tf" value="$(arg pub_odom_tf)" />        
     </include>
    
     <group if="$(arg laser)">
